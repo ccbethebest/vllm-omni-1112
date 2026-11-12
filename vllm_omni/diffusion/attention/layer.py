@@ -236,7 +236,7 @@ def _encode_scheduled_op_metadata(
     ints: list[int | torch.SymInt] = []
     layout = attn_metadata.video_layout
     if layout is not None:
-        if type(layout) is not VideoTokenLayout or layout.video_spans:
+        if type(layout) is not VideoTokenLayout or layout.video_spans or layout.image_spans:
             return None
         spec += ";L"
         for field_value in (layout.prefix_len, layout.used_len):

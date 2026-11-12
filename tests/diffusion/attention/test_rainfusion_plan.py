@@ -23,7 +23,12 @@ import torch
 from tests.e2e.online_serving.minimax_h3.rainfusion_trace import Ref2VASparseTrace
 from tests.helpers.mark import hardware_marks
 from vllm_omni.diffusion.attention.backends import rainfusion_attn
-from vllm_omni.diffusion.attention.backends.abstract import AttentionMetadata, VideoTokenLayout, VideoTokenSpan
+from vllm_omni.diffusion.attention.backends.abstract import (
+    AttentionMetadata,
+    ImageTokenSpan,
+    VideoTokenLayout,
+    VideoTokenSpan,
+)
 from vllm_omni.diffusion.attention.backends.rainfusion_attn import (
     _BLOCK_SIZE,
     RainFusionAttentionBackend,
@@ -430,3 +435,67 @@ def test_mix_with_single_video_span_reaches_mindiesd(monkeypatch):
     impl._forward_sparse_npu(q, q, q, plan)
 
     assert calls == [("mix", spans, "rf_v3")]
+
+
+def test_independent_image_and_eight_step_video_sparsity():
+    from vllm_omni.diffusion.data import AttentionSpec
+
+    rates = [0.2, 0.2, 0.15, 0.15, 0.15, 0.15, 0.15, 0.15]
+    spec = AttentionSpec(
+        backend="RAINFUSION_ATTN",
+        block_sparse={
+            "sparsity": 0.2,
+            "image_sparsity": 0.9,
+            "sparsity_by_step": rates,
+        },
+    )
+    config = rainfusion_attn.RainFusionConfig.from_backend_kwargs(spec.backend_kwargs())
+    assert config.image_sparsity == 0.9
+    assert [config.video_sparsity(step, 8) for step in range(8)] == rates
+    with pytest.raises(ValueError, match="match the active"):
+        config.video_sparsity(0, 7)
+
+
+def test_image_metadata_does_not_enter_video_spans():
+    layout = VideoTokenLayout(
+        prefix_len=0,
+        latent_grid=None,
+        used_len=4224,
+        video_spans=(VideoTokenSpan(start=128, latent_grid=(4, 32, 32), role="target"),),
+        image_spans=(ImageTokenSpan(start=0, latent_grid=(8, 16)),),
+    )
+    plan = make_impl(image_sparsity=0.1)._resolve_multi_span_plan(layout, 4224)
+    assert plan is not None
+    assert plan.video_spans == [{"start": 128, "latent_shape": [4, 32, 32]}]
+    assert plan.image_spans == [{"start": 0, "latent_shape": [8, 16]}]
+
+
+@pytest.mark.parametrize("cached", [False, True])
+def test_reference_image_geometry_survives_kv_cache_compaction(cached):
+    from vllm_omni.diffusion.models.minimax_h3.minimax_h3_transformer import (
+        _compact_reference_video_layout,
+        _reference_kv_video_layout,
+    )
+
+    layout = VideoTokenLayout(
+        used_len=640,
+        video_spans=(VideoTokenSpan(start=128, latent_grid=(4, 8, 16), role="target"),),
+        image_spans=(ImageTokenSpan(start=0, latent_grid=(8, 16)),),
+    )
+    positions = torch.arange(128) if cached else torch.empty(0, dtype=torch.long)
+    compact = _compact_reference_video_layout(layout, positions, 640 - positions.numel())
+    assert compact is not None
+    assert len(compact.image_spans) == (0 if cached else 1)
+    restored = _reference_kv_video_layout(layout, positions, compact)
+    assert restored.image_spans == layout.image_spans
+    assert restored.video_spans == layout.video_spans
+
+
+def test_image_selection_targets_exclude_reference_video():
+    layout = VideoTokenLayout(
+        used_len=8320,
+        video_spans=(VideoTokenSpan(128, (4, 32, 32), "reference"), VideoTokenSpan(4224, (4, 32, 32), "target")),
+        image_spans=(ImageTokenSpan(0, (8, 16)),),
+    )
+    plan = make_impl(image_sparsity=0.9)._resolve_multi_span_plan(layout, 8320)
+    assert plan.target_ranges == ((4224, 8320),)

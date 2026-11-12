@@ -2263,6 +2263,8 @@ class BlockSparseSpec:
     index selector such as "0-3,38") exempts individual DiT blocks. Those two are
     the accuracy knobs to trade back quality at a fixed ``sparsity``.
     ``precision`` selects the kernel precision mode (see ``RainFusionPrecision``).
+    ``image_sparsity`` independently controls reference-image query blocks;
+    ``sparsity_by_step`` overrides video sparsity at each zero-based denoise step.
     """
 
     sparsity: float = 0.8
@@ -2271,9 +2273,15 @@ class BlockSparseSpec:
     precision: str = RainFusionPrecision.BF16.value
     skip_layers: str | list[int] | None = None
     skip_layer_indices: set[int] | None = field(default=None, repr=False)
+    image_sparsity: float = 0.0
+    sparsity_by_step: tuple[float, ...] = ()
 
     def __post_init__(self) -> None:
         self.sparsity = _in_range(self.sparsity, "block_sparse.sparsity", 0.0, 1.0) or 0.0
+        self.image_sparsity = _in_range(self.image_sparsity, "block_sparse.image_sparsity", 0.0, 1.0) or 0.0
+        self.sparsity_by_step = tuple(
+            _in_range(rate, "block_sparse.sparsity_by_step", 0.0, 1.0) or 0.0 for rate in self.sparsity_by_step
+        )
         if self.start_step < 0:
             raise ValueError(f"block_sparse.start_step must be >= 0; got {self.start_step!r}.")
         if self.end_step < 0:
@@ -2397,6 +2405,10 @@ class AttentionSpec:
         if self.block_sparse is not None:
             bs = self.block_sparse
             kw["sparsity"] = bs.sparsity
+            if bs.image_sparsity:
+                kw["image_sparsity"] = bs.image_sparsity
+            if bs.sparsity_by_step:
+                kw["sparsity_by_step"] = bs.sparsity_by_step
             kw["start_step"] = bs.start_step
             kw["end_step"] = bs.end_step
             kw["precision"] = bs.precision

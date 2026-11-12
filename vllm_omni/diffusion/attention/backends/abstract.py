@@ -198,6 +198,18 @@ class VideoTokenSpan:
 
 
 @dataclass(frozen=True, slots=True)
+class ImageTokenSpan:
+    """Physical reference-image rows, independent of video geometry."""
+
+    start: int
+    latent_grid: tuple[int, int]
+
+    @property
+    def length(self) -> int:
+        return self.latent_grid[0] * self.latent_grid[1]
+
+
+@dataclass(frozen=True, slots=True)
 class VideoTokenLayout:
     """Video-grid slices in a packed multimodal sequence.
 
@@ -209,7 +221,8 @@ class VideoTokenLayout:
 
     ``prefix_len``/``latent_grid`` retain the original one-tail contract. A
     Ref2VA layout instead publishes ``used_len`` and every physical video
-    span, so audio and image rows between videos remain dense.
+    span. Optional ``image_spans`` describes reference images independently;
+    audio and remaining context rows stay dense.
 
     Plain ints, so reading it never forces a device-to-host sync.
     """
@@ -218,6 +231,7 @@ class VideoTokenLayout:
     latent_grid: tuple[int, int, int] | None = None
     used_len: int | None = None
     video_spans: tuple[VideoTokenSpan, ...] = ()
+    image_spans: tuple[ImageTokenSpan, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)

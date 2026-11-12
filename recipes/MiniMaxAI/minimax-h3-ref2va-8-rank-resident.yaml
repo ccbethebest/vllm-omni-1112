@@ -17,7 +17,9 @@ vae-parallel-mode: tile
 vae-use-tiling: true
 vae-patch-parallel-size: 8
 enable-distributed-layerwise-offload: true
-diffusion-attention-backend: FLASH_ATTN
+default-sampling-params: '{"0":{"num_inference_steps":8}}'
+diffusion-attention-config: >-
+  {"default":{"backend":"RAINFUSION_ATTN","block_sparse":{"sparsity":0.2,"image_sparsity":0.9,"sparsity_by_step":[0.2,0.2,0.15,0.15,0.15,0.15,0.15,0.15]}}}
 
 # The CLI accepts this argument as JSON. Selecting only these two components
 # keeps video/audio VAEs resident and preserves rank-local text weight transfer.

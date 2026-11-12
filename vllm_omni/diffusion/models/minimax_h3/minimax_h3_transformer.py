@@ -28,6 +28,7 @@ from vllm.model_executor.layers.linear import (
 from vllm.model_executor.model_loader.weight_utils import default_weight_loader
 
 from vllm_omni.diffusion.attention.backends.abstract import (
+    ImageTokenSpan,
     VideoTokenLayout,
     VideoTokenSpan,
 )
@@ -134,7 +135,19 @@ def _compact_reference_video_layout(
         targets.append(VideoTokenSpan(start=compact_start, latent_grid=grid, role="target"))
     if len(targets) != 1:
         return None
-    return VideoTokenLayout(used_len=used_length, video_spans=tuple(targets))
+    images = []
+    for span in layout.image_spans:
+        removed = bisect_left(positions, span.start + span.length) - bisect_left(positions, span.start)
+        if removed == 0:
+            images.append(
+                ImageTokenSpan(
+                    start=span.start - bisect_left(positions, span.start),
+                    latent_grid=span.latent_grid,
+                )
+            )
+        elif removed != span.length:
+            return None
+    return VideoTokenLayout(used_len=used_length, video_spans=tuple(targets), image_spans=tuple(images))
 
 
 def _reference_kv_video_layout(
@@ -144,8 +157,8 @@ def _reference_kv_video_layout(
 ) -> VideoTokenLayout | None:
     """Keep complete reference-video spans in the cached K/V prefix.
 
-    Q has only target rows. Images, partial video spans, and other context
-    retain their existing dense protection because they have no K/V video span.
+    Q has only target rows. Complete images retain separate image geometry;
+    partial video spans and other context retain dense protection.
     """
     if compact is None:
         return None
@@ -164,7 +177,17 @@ def _reference_kv_video_layout(
         VideoTokenSpan(start=span.start + reference_rows, latent_grid=span.latent_grid, role=span.role)
         for span in compact.video_spans
     )
+    images = []
+    for span in original.image_spans:
+        first = bisect_left(positions, span.start)
+        last = bisect_left(positions, span.start + span.length)
+        if last - first == span.length:
+            images.append(ImageTokenSpan(start=first, latent_grid=span.latent_grid))
+    images.extend(
+        ImageTokenSpan(start=span.start + reference_rows, latent_grid=span.latent_grid) for span in compact.image_spans
+    )
     return VideoTokenLayout(
+        image_spans=tuple(sorted(images, key=lambda span: span.start)),
         used_len=compact.used_len + reference_rows,
         video_spans=tuple(sorted(spans, key=lambda span: span.start)),
     )
