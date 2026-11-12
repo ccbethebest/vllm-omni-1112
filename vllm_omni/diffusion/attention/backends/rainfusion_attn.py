@@ -147,7 +147,6 @@ class RainFusionPlan:
     latent_shape: list[int] | None = None
     video_spans: list[dict[str, object]] | None = None
     image_spans: list[dict[str, object]] | None = None
-    target_ranges: tuple[tuple[int, int], ...] = ()
 
 
 class RainFusionAttentionBackend(AttentionBackend):
@@ -654,13 +653,6 @@ class RainFusionAttentionImpl(AttentionImpl):
             used_len=int(used_len),
             video_spans=spans,
             image_spans=images or None,
-            target_ranges=tuple(
-                (span.start, span.start + math.prod(span.latent_grid))
-                for span in layout.video_spans
-                if span.role == "target"
-            )
-            if images
-            else (),
         )
 
     def _forward_sparse_npu(
@@ -721,14 +713,11 @@ class RainFusionAttentionImpl(AttentionImpl):
         }
         if plan.image_spans:
             parameters = inspect.signature(sparse_attention).parameters
-            if not {"image_spans", "image_sparsity", "target_ranges"}.issubset(parameters):
-                raise ValueError(
-                    "Upgrade MindIE-SD: independent image sparsity requires image_spans/image_sparsity/target_ranges."
-                )
+            if not {"image_spans", "image_sparsity"}.issubset(parameters):
+                raise ValueError("Upgrade MindIE-SD: independent image sparsity requires image_spans/image_sparsity.")
             common_kwargs.update(
                 image_spans=plan.image_spans,
                 image_sparsity=self.rainfusion.image_sparsity,
-                target_ranges=plan.target_ranges,
             )
         if plan.video_spans is not None:
             out = sparse_attention(

@@ -491,11 +491,15 @@ def test_reference_image_geometry_survives_kv_cache_compaction(cached):
     assert restored.video_spans == layout.video_spans
 
 
-def test_image_selection_targets_exclude_reference_video():
+def test_image_selection_uses_supplied_video_spans():
     layout = VideoTokenLayout(
         used_len=8320,
         video_spans=(VideoTokenSpan(128, (4, 32, 32), "reference"), VideoTokenSpan(4224, (4, 32, 32), "target")),
         image_spans=(ImageTokenSpan(0, (8, 16)),),
     )
     plan = make_impl(image_sparsity=0.9)._resolve_multi_span_plan(layout, 8320)
-    assert plan.target_ranges == ((4224, 8320),)
+    assert plan.video_spans == [
+        {"start": 128, "latent_shape": [4, 32, 32]},
+        {"start": 4224, "latent_shape": [4, 32, 32]},
+    ]
+    assert "target_ranges" not in dataclasses.asdict(plan)
